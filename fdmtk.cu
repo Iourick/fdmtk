@@ -9,7 +9,8 @@
 //
 //  Created by Keith Bannister on 19/07/2016.
 //  Copyright (c) 2016 Keith Bannister. All rights reserved.
-// branch02
+
+ /*br03. COMPARE KEITH AND BARAK APPROACHES*/
 
 #include <stdio.h>
 #include <stdlib.h>
