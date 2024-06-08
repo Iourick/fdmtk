@@ -15,11 +15,11 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 include(CheckLanguage)
 check_language(CUDA)
 enable_language(CUDA)
-
+set(CMAKE_BUILD_TYPE Release)
 # Set CUDA path and CUB path
 #set(CUDA_PATH "/usr/bin" CACHE PATH "CUDA Toolkit path")
 include_directories(/usr/local/cuda-12.5/targets/x86_64-linux/include/cub)
-include_directories(${CMAKE_SOURCE_DIR})
+
 
 # List of source files
 set(SRC_FILES
