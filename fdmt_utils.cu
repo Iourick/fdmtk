@@ -15,7 +15,7 @@ int __device__ calculate_offset()
 	int idt = blockIdx.y;
 	int max_dt = gridDim.y;
 
-	//int nt = blockDim.x;
+	int nt = blockDim.x;
 	int off = max_dt*(idt + ibeam*nbeams);
 	return off;
 }

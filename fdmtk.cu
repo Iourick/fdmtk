@@ -2,7 +2,11 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
+#include <fdmt_gpu.cuh>
+#include <fdmt_base.hpp>
+#include <chrono>
 
+class FDMTGPU;
 //
 //  fdmt_test.c
 //  fdmt
@@ -97,8 +101,10 @@ void dumparr(const char* prefix, const int blocknum, array4d_t* arr, bool copy =
 
 int main(int argc, char* argv[])
 {
-	int nd = 1024;
-	int nt = 512;
+	/*int nd = 1024;
+	int nt = 512;*/
+	int nd =512;
+	int nt = 512; 
 	float seek_seconds = 0.0;
 	int num_rescale_blocks = 2;
 	float decay_timescale = 0.2; // Seconds?
@@ -433,9 +439,45 @@ int main(int argc, char* argv[])
 			}
 		}
 
+
+		FDMTGPU fdmt_pravir(fdmt.fmin, fdmt.fmax, static_cast<unsigned long>(fdmt.nf), static_cast<unsigned long>(fdmt.nt), 0.0f,
+			static_cast<unsigned long>(fdmt.max_dt) -1,  1,  0);
+		
+		int iImCols = fdmt.nt;
+		int iImRows = fdmt.nf;
+		int IOutImageRows = static_cast<unsigned long>(fdmt.max_dt);
+		float* parrImage = NULL;
+		float* parrImOut = NULL;
+		cudaMalloc(&parrImage, sizeof(float) * iImRows * iImCols);
+		
+		cudaMalloc(&parrImOut, iImCols * IOutImageRows * sizeof(float));
 		if (blocknum >= num_rescale_blocks) {
 			/// Execute the FDMT
-			fdmt_execute(&fdmt, rescale_buf.d_device, out_buf.d);
+
+			int num = 100;
+			auto start = std::chrono::high_resolution_clock::now();
+			for (int i = 0; i < num; ++i)
+			{
+				fdmt_pravir.execute(parrImage, 0, parrImOut, 0);
+				int gg = 0;
+			}
+			
+			auto end = std::chrono::high_resolution_clock::now();
+			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "Pravir:    "  << "  Time taken by function FDMT : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+			cudaFree(parrImage);
+			cudaFree(parrImOut);
+			start = std::chrono::high_resolution_clock::now();
+			for (int i = 0; i < num; ++i)
+			{
+				fdmt_execute(&fdmt, rescale_buf.d_device, out_buf.d);
+			}
+			end = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "Keith:    "  << "  Time taken by function fncFdmtU_cu : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+			break;
+
+
 			if (dump_data) {
 				dumparr("fdmt", iblock, &out_buf, false);
 			}

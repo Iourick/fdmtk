@@ -6,15 +6,20 @@ set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.5/bin/nvcc")
 
 
 # Project name
-project(fdmtk LANGUAGES CXX )
+#project(fdmtk LANGUAGES CXX )
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 include(CheckLanguage)
 check_language(CUDA)
 enable_language(CUDA)
-
+set(CMAKE_BUILD_TYPE Release)
 # Set CUDA path and CUB path
 #set(CUDA_PATH "/usr/bin" CACHE PATH "CUDA Toolkit path")
 include_directories(/usr/local/cuda-12.5/targets/x86_64-linux/include/cub)
+
 
 # List of source files
 set(SRC_FILES
@@ -30,8 +35,11 @@ set(SRC_FILES
     fdmt.cu
     rescale.cu
     SigprocFile.cu
-    SigprocFileSet.cu
-    fdmt_utils.cu
+    SigprocFileSet.cu 
+    fdmt_base.cu
+    #fdmt_cpu.cu
+    fdmt_gpu.cu
+    fdmtUtils.cu    
 )
 
 # Set compiler flags
