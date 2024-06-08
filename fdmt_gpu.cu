@@ -234,12 +234,6 @@ std::vector<SizeType>  flatten_mappings(const std::vector<std::vector<FDMTCoordM
 //-----------------------------------------------------
 void  FDMTGPU::execute(const float* waterfall, size_t waterfall_size, float* dmt,  size_t dmt_size)
 {
-    cudaStatus0 = cudaGetLastError();
-    if (cudaStatus0 != cudaSuccess)
-    {
-        fprintf(stderr, "cudaGetLastError failed: %s\n", cudaGetErrorString(cudaStatus0));
-        return;
-    }
    // check_inputs(waterfall_size, dmt_size);
     float* state_in_ptr = thrust::raw_pointer_cast(m_state_in_d.data());
     float* state_out_ptr = thrust::raw_pointer_cast(m_state_out_d.data());
@@ -257,20 +251,13 @@ void  FDMTGPU::execute(const float* waterfall, size_t waterfall_size, float* dmt
     int* pstate_sub_idx_cur = &pstate_sub_idx[m_fdmt_plan_d.len_state_sub_idx_cumsum_h[0]]; //+
 
     int* ppos_gridInnerVects_cur = &ppos_gridInnerVects[m_fdmt_plan_d.pos_gridSubVects_h[0]]; //+
-    
-    cudaStatus0 = cudaGetLastError();
-    if (cudaStatus0 != cudaSuccess)
-    {
-        fprintf(stderr, "cudaGetLastError failed: %s\n", cudaGetErrorString(cudaStatus0));
-        return;
-    }
     const dim3 blockSize = dim3(64, 1);
     const dim3 gridSize = dim3((nsamps + blockSize.x - 1) / blockSize.x,nchan);
 
     auto start = std::chrono::high_resolution_clock::now();    
     
-        //kernel_init_fdmt << < gridSize, blockSize>> > (waterfall, pstate_sub_idx_cur, pdt_grid
-           // , ppos_gridInnerVects_cur, state_in_ptr, nsamps);
+        kernel_init_fdmt_v1 << < gridSize, blockSize, (10 + blockSize.x) * sizeof(float) >> > (waterfall, pstate_sub_idx_cur, pdt_grid
+            , ppos_gridInnerVects_cur, state_in_ptr, nsamps);
        // cudaDeviceSynchronize(); 
    
     auto end = std::chrono::high_resolution_clock::now();
@@ -330,7 +317,7 @@ void  FDMTGPU::execute(const float* waterfall, size_t waterfall_size, float* dmt
 
         const dim3 blockSize = dim3(1024, 1);
         const dim3 gridSize = dim3((nsamps + blockSize.x - 1) / blockSize.x, coords_max);
-         kernel_execute_iter << < gridSize, blockSize >> > (state_in_ptr, state_out_ptr
+         kernel_execute_iter_v1 << < gridSize, blockSize >> > (state_in_ptr, state_out_ptr
           , pcoords_cur
           , pmappings_cur
           , pcoords_copy_cur
@@ -373,13 +360,13 @@ void  kernel_init_fdmt(const float* __restrict waterfall, int* __restrict pstate
     {
         return;
     }
-  //  int i_sub = blockIdx.y;
+    int i_sub = blockIdx.y;
     //// Initialise state for [:, dt_init_min, dt_init_min:]
-  //  int  dt_grid_sub_min = p_dt_grid[ppos_gridInnerVects_cur[i_sub]];
+    int  dt_grid_sub_min = p_dt_grid[ppos_gridInnerVects_cur[i_sub]];
 
     // int  state_sub_idx = pstate_sub_idx_cur[p_len_state_sub_idx_cumsum[0] + i_sub];
-  //  int  state_sub_idx = pstate_sub_idx_cur[i_sub];
-   /* if (isamp >= dt_grid_sub_min)
+    int  state_sub_idx = pstate_sub_idx_cur[i_sub];
+    if (isamp >= dt_grid_sub_min)
     {
         float sum = 0.0F;
         for (int i = isamp - dt_grid_sub_min; i <= isamp; ++i)
@@ -391,77 +378,27 @@ void  kernel_init_fdmt(const float* __restrict waterfall, int* __restrict pstate
     else
     {
         state[state_sub_idx + isamp] = 0.0F;
-    }*/
+    }
     ////---
-   // int  dt_grid_sub_size = ppos_gridInnerVects_cur[i_sub + 1] - ppos_gridInnerVects_cur[i_sub];
+    int  dt_grid_sub_size = ppos_gridInnerVects_cur[i_sub + 1] - ppos_gridInnerVects_cur[i_sub];
 
-    //for (int i_dt = 1; i_dt < dt_grid_sub_size; ++i_dt)
-    //{
-    //    int dt_cur = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt];// dt_grid_sub[i_dt];
-    //    int dt_prev = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt - 1];
-    //    float sum = 0.0F;
-    //    if (isamp >= dt_cur)
-    //    {
-    //        for (int i = isamp - dt_cur; i < isamp - dt_prev; ++i)
-    //        {
-    //            sum += waterfall[i_sub * nsamps + i];
-    //        }
-    //        state[state_sub_idx + i_dt * nsamps + isamp] = (state[state_sub_idx + (i_dt - 1) * nsamps + isamp] *
-    //            (static_cast<float>(dt_prev) + 1.0F) + sum) / (static_cast<float>(dt_cur) + 1.0F);
-    //    }
-
-    //}
+    for (int i_dt = 1; i_dt < dt_grid_sub_size; ++i_dt)
+    {
+        int dt_cur = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt];// dt_grid_sub[i_dt];
+        int dt_prev = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt - 1];
+        float sum = 0.0F;
+        if (isamp >= dt_cur)
+        {
+            for (int i = isamp - dt_cur; i < isamp - dt_prev; ++i)
+            {
+                sum += waterfall[i_sub * nsamps + i];
+            }
+            state[state_sub_idx + i_dt * nsamps + isamp] = (state[state_sub_idx + (i_dt - 1) * nsamps + isamp] *
+                (static_cast<float>(dt_prev) + 1.0F) + sum) / (static_cast<float>(dt_cur) + 1.0F);
+        }
+        
+    }
 }
-
-//--------------------------------------------------------------
-//__global__
-//void  kernel_init_fdmt(const float* __restrict waterfall, int* __restrict pstate_sub_idx_cur
-//    , int* __restrict p_dt_grid, int* __restrict ppos_gridInnerVects_cur, float* __restrict state, const int nsamps)
-//{
-//    int isamp = blockIdx.x * blockDim.x + threadIdx.x;
-//    if (isamp >= nsamps)
-//    {
-//        return;
-//    }
-//    int i_sub = blockIdx.y;
-//    //// Initialise state for [:, dt_init_min, dt_init_min:]
-//    int  dt_grid_sub_min = p_dt_grid[ppos_gridInnerVects_cur[i_sub]];
-//
-//    // int  state_sub_idx = pstate_sub_idx_cur[p_len_state_sub_idx_cumsum[0] + i_sub];
-//    int  state_sub_idx = pstate_sub_idx_cur[i_sub];
-//    if (isamp >= dt_grid_sub_min)
-//    {
-//        float sum = 0.0F;
-//        for (int i = isamp - dt_grid_sub_min; i <= isamp; ++i)
-//        {
-//            sum += waterfall[i_sub * nsamps + i];
-//        }
-//        state[state_sub_idx + isamp] = sum / static_cast<float>(dt_grid_sub_min + 1);
-//    }
-//    else
-//    {
-//        state[state_sub_idx + isamp] = 0.0F;
-//    }
-//    ////---
-//    int  dt_grid_sub_size = ppos_gridInnerVects_cur[i_sub + 1] - ppos_gridInnerVects_cur[i_sub];
-//
-//    for (int i_dt = 1; i_dt < dt_grid_sub_size; ++i_dt)
-//    {
-//        int dt_cur = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt];// dt_grid_sub[i_dt];
-//        int dt_prev = p_dt_grid[ppos_gridInnerVects_cur[i_sub] + i_dt - 1];
-//        float sum = 0.0F;
-//        if (isamp >= dt_cur)
-//        {
-//            for (int i = isamp - dt_cur; i < isamp - dt_prev; ++i)
-//            {
-//                sum += waterfall[i_sub * nsamps + i];
-//            }
-//            state[state_sub_idx + i_dt * nsamps + isamp] = (state[state_sub_idx + (i_dt - 1) * nsamps + isamp] *
-//                (static_cast<float>(dt_prev) + 1.0F) + sum) / (static_cast<float>(dt_cur) + 1.0F);
-//        }
-//
-//    }
-//}
 
 
 
@@ -512,8 +449,11 @@ void  kernel_init_fdmt_v1(const float* __restrict waterfall, int* __restrict pst
             }
             state[iarr_sh[1] + i_dt * nsamps + isamp] = state[iarr_sh[1] + (i_dt - 1) * nsamps + isamp] *
                 fdividef(static_cast<float>(dt_prev) + 1.0F + sum, static_cast<float>(dt_cur) + 1.0F) ;
-        }        
+        }
+        
     }
+
+
 }
 //--------------------------------------------------------------
 //__global__

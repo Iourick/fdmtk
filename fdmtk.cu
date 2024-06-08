@@ -405,14 +405,17 @@ int main(int argc, char* argv[])
 
 
 		// do rescaling if required
-		if (num_rescale_blocks > 0 && blocknum % num_rescale_blocks == 0) {
+		if (num_rescale_blocks > 0 && blocknum % num_rescale_blocks == 0)
+		{
 			rescale_update_scaleoffset_gpu(rescale);
 
 			// Count how many  channels have been flagged for this whole block
 			// by looking at how many channels have scale==0
 			array4d_copy_to_host(&rescale.scale);
-			for (int i = 0; i < nf * nbeams; ++i) {
-				if (rescale.scale.d[i] == 0) {
+			for (int i = 0; i < nf * nbeams; ++i)
+			{
+				if (rescale.scale.d[i] == 0)
+				{
 					// that channel will stay flagged for num_rescale_blocks
 					num_flagged_beam_chans += num_rescale_blocks;
 				}
@@ -475,7 +478,7 @@ int main(int argc, char* argv[])
 			end = std::chrono::high_resolution_clock::now();
 			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 			std::cout << "Keith:    "  << "  Time taken by function fncFdmtU_cu : " << duration.count() / ((double)num) << " microseconds" << std::endl;
-			break;
+			return;
 
 
 			if (dump_data) {
