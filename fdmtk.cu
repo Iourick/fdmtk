@@ -9,7 +9,7 @@
 //
 //  Created by Keith Bannister on 19/07/2016.
 //  Copyright (c) 2016 Keith Bannister. All rights reserved.
-// branch02
+// branch02 For learn, original version
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -273,6 +273,7 @@ int main(int argc, char* argv[])
 	rescale.target_mean = 0.0;
 	//rescale.target_stdev = 1.0/sqrt((float) nf);
 	rescale.target_stdev = 1.0;
+	
 	rescale.decay_constant = 0.35 * decay_timescale / source.tsamp(); // This is how the_decimator.C does it, I think.
 	rescale.mean_thresh = mean_thresh;
 	rescale.std_thresh = std_thresh;
@@ -289,10 +290,12 @@ int main(int argc, char* argv[])
 		rescale.flag_grow);
 	//rescale_allocate(&rescale, nbeams*nf);
 	rescale_allocate_gpu(&rescale, nbeams, nf, nt, true); // Need host memory allocated for rescale because we copy back to count flags
-	if (num_rescale_blocks == 0) {
+	if (num_rescale_blocks == 0) 
+	{
 		rescale_set_scale_offset_gpu(&rescale, 1.0f, -128.0f); // Just pass it straight through without rescaling
 	}
-	else {
+	else
+	{
 		rescale_set_scale_offset_gpu(&rescale, rescale.target_stdev / 18.0, -128.0f); // uint8 stdev is 18 and mean +128.
 	}
 
@@ -432,10 +435,12 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		if (blocknum >= num_rescale_blocks) {
+		if (blocknum >= num_rescale_blocks)
+		{
 			/// Execute the FDMT
 			fdmt_execute(&fdmt, rescale_buf.d_device, out_buf.d);
-			if (dump_data) {
+			if (dump_data) 
+			{
 				dumparr("fdmt", iblock, &out_buf, false);
 			}
 			size_t sampno = iblock * nt;
@@ -451,7 +456,8 @@ int main(int argc, char* argv[])
 			tboxcar.stop();
 			total_candidates += candidate_list.copy_to_sink(sink, sampno);
 
-			if (dump_data) {
+			if (dump_data) 
+			{
 				dumparr("boxcar", iblock, &boxcar_data, true);
 			}
 		}
@@ -465,7 +471,8 @@ int main(int argc, char* argv[])
 	// calculate array discards
 	array4d_copy_to_host(&boxcar_discards);
 	int total_discards = 0;
-	for (int i = 0; i < array4d_size(&boxcar_discards); ++i) {
+	for (int i = 0; i < array4d_size(&boxcar_discards); ++i)
+	{
 		total_discards += (int)boxcar_discards.d[i];
 	}
 

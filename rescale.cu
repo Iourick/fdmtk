@@ -363,7 +363,7 @@ __global__ void rescale_calc_dm0_kernel (
 	// input = BTF order
 	// dm0 order: BT
 	// Rescale: BF order
-
+	
 	int ibeam = blockIdx.x;
 	for(int t = threadIdx.x; t < nt; t += blockDim.x)
 	{
