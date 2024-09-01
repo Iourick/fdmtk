@@ -32,6 +32,11 @@ set(SRC_FILES
     SigprocFile.cu
     SigprocFileSet.cu
     fdmt_utils.cu
+    npy.hpp
+    Candidate.cu
+    Clusterization.cu
+    Segmented_sort.cu
+    select_delegates.cu
 )
 
 # Set compiler flags

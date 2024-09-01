@@ -2,7 +2,9 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
-
+#include <chrono>
+#include "npy.hpp"
+#define MAX_CANDIDATE_PER_CHUNK 4096
 //
 //  fdmt_test.c
 //  fdmt
@@ -33,6 +35,8 @@
 #include "CandidateList.h"
 
 #include "rescale.h"
+#include "Clusterization.cuh"
+#include <iomanip> // Include this header for std::setw
 
 const int VERSION = 0;
 using namespace std;
@@ -99,7 +103,7 @@ int main(int argc, char* argv[])
 	int nd = 1024;
 	int nt = 512;
 	float seek_seconds = 0.0;
-	int num_rescale_blocks = 2;
+	int num_rescale_blocks =   2;
 	float decay_timescale = 0.2; // Seconds?
 	char ch;
 	float thresh = 10.0;
@@ -107,7 +111,7 @@ int main(int argc, char* argv[])
 	int cuda_device = 0;
 	float kurt_thresh = 1e9;
 	float std_thresh = 1e9;
-	bool dump_data = false;
+	bool dump_data = true;
 	float mean_thresh = 1e9;
 	float dm0_thresh = 1e9;
 	float cell_thresh = 1e9;
@@ -355,8 +359,12 @@ int main(int argc, char* argv[])
 	int num_flagged_times = 0;
 	//int blocks_since_rescale_update = 0;
 
-	while (source.read_samples_uint8(nt, read_buf) == nt)
+	int counter = -1;
+	//while (source.read_samples_uint8(nt, read_buf) == nt) //!!	
+	for (int iss = 0; iss<3; ++iss)
 	{
+		++counter;
+		source.read_samples_uint8(nt, read_buf);
 		if (stopped)
 		{
 			printf("Stopped due to signal received\n");
@@ -443,23 +451,167 @@ int main(int argc, char* argv[])
 			{
 				dumparr("fdmt", iblock, &out_buf, false);
 			}
+
+			/*------------ OUTPUT TO NPY -----------------------------------------------------------------------*/
+			std::vector<float> v1(out_buf.d, out_buf.d + nt * nd);
+			std::array<long unsigned, 2> leshape101{ nd ,nt };
+			npy::SaveArrayAsNumpy("output.npy", false, leshape101.size(), leshape101.data(), v1);
+			/*----------------------------------------------------------------------------------------------------------------*/
+
+
 			size_t sampno = iblock * nt;
 
 			//total_candidates += boxcar_threshonly(&out_buf, sampno, thresh, max_ncand_per_block, mindm, sink);
 			tboxcar.start();
-			boxcar_do_gpu(
-				&fdmt.ostate,
-				&boxcar_data,
-				&boxcar_history,
-				&boxcar_discards,
-				thresh, max_ncand_per_block, mindm, maxbc, &candidate_list);
+
+			int num = 100;
+			auto start = std::chrono::high_resolution_clock::now();
+			for (int ic = 0; ic < num; ++ic)
+			{
+				boxcar_do_gpu(
+					&fdmt.ostate,
+					&boxcar_data,
+					&boxcar_history,
+					&boxcar_discards,
+					thresh, max_ncand_per_block, mindm, maxbc, &candidate_list);
+			}
+			auto end = std::chrono::high_resolution_clock::now();
+			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "  Time taken by function boxcar_do_gpu : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+
 			tboxcar.stop();
 			total_candidates += candidate_list.copy_to_sink(sink, sampno);
+			if (total_candidates > 0)
+			{
+				int ccc = 0;
+			}
+			
 
 			if (dump_data) 
 			{
 				dumparr("boxcar", iblock, &boxcar_data, true);
 			}
+			/*----------------------------------------------------------------------------------------------*/
+	//-----
+			Cand* d_arrCand = nullptr;
+			cudaMalloc((void**)&d_arrCand, MAX_CANDIDATE_PER_CHUNK * sizeof(Cand));
+			cudaError_t err = cudaGetLastError();
+			if (err != cudaSuccess)
+			{
+				printf("CUDA Error: %s\n", cudaGetErrorString(err));
+			}
+			unsigned int* d_pimax_candidates_per_chunk = nullptr;
+			cudaMalloc((void**)&d_pimax_candidates_per_chunk, sizeof(unsigned int));
+			unsigned int  itemp = MAX_CANDIDATE_PER_CHUNK;
+			cudaMemcpy(d_pimax_candidates_per_chunk, &itemp, sizeof(unsigned int), cudaMemcpyHostToDevice);
+
+			itemp = 0;
+			unsigned int* d_pquantCand = 0;
+			cudaMalloc((void**)&d_pquantCand, sizeof(unsigned int));
+			cudaMemcpy(d_pquantCand, &itemp, sizeof(unsigned int), cudaMemcpyHostToDevice);
+
+			float* d_pTresh = nullptr;
+			cudaMalloc((void**)&d_pTresh, sizeof(float));
+			cudaMemcpy(d_pTresh, &thresh, sizeof(float), cudaMemcpyHostToDevice);
+			const int QUantPower2_Wnd = 0;// 5;
+			int cols = nt;
+			int rows = nd;
+			cudaMemcpy(out_buf.d_device, out_buf.d, rows * cols * sizeof(float), cudaMemcpyHostToDevice);
+			const dim3 blockSize(256, 1, 1);
+			const dim3 gridSize((cols + blockSize.x - 1) / blockSize.x, rows, 1);
+			start = std::chrono::high_resolution_clock::now();
+			for (int ic = 0; ic < num; ++ic)
+			{
+				itemp = 0;
+				cudaMemcpy(d_pquantCand, &itemp, sizeof(unsigned int), cudaMemcpyHostToDevice);
+				clusterization::gather_candidates_in_fixedArray_kernel_v0 << <gridSize, blockSize >> >
+					(out_buf.d_device, cols, *d_pTresh
+						, QUantPower2_Wnd, d_pimax_candidates_per_chunk, d_arrCand, d_pquantCand[0]);
+
+			}
+			end = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "  Time taken by function gather_candidates_in_fixed.. : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+			unsigned int h_quantCand = 0;
+
+			cudaMemcpy(&h_quantCand, d_pquantCand, sizeof(int), cudaMemcpyDeviceToHost);
+			std::string filename1 = "ouput1.log";
+			clusterization::write_log_v0(d_arrCand
+				, h_quantCand
+				, filename1
+				, 0.00001
+				, 0.0);
+			Cand* arrMyCand = new Cand[h_quantCand];
+			cudaMemcpy(arrMyCand, d_arrCand, h_quantCand * sizeof(Cand), cudaMemcpyDeviceToHost);
+			std::sort(arrMyCand, arrMyCand + h_quantCand, compareByMt);
+			std::string filename0("my_candidates.csv");
+			clusterization::writeCandHostArrayToCSV(arrMyCand, h_quantCand, filename0);
+
+			// fussy things with Keith info
+			std::string fredaCandfilename("fredda.cand");
+			int quantFreddaCand = clusterization::countCandidatesInFreddaFile(fredaCandfilename);
+
+			Cand* arrFreddaCand = new Cand[quantFreddaCand];
+
+			// Read the data file and fill the array
+			clusterization::readFreddaCandFile("fredda.cand", arrFreddaCand, quantFreddaCand);
+			std::sort(arrFreddaCand, arrFreddaCand + quantFreddaCand, compareByMt);
+			std::string filename00("fredda_candidates.csv");
+			clusterization::writeCandHostArrayToCSV(arrFreddaCand, quantFreddaCand, filename00);
+			//-----------------------------------------------------
+			unsigned int d_quantCand_ = 0;
+			
+			unsigned int i0 = 0;
+			
+			Cand* d_arrCand_ = nullptr;
+			start = std::chrono::high_resolution_clock::now();
+			for (int ic = 0; ic < num; ++ic)
+			{
+
+				clusterization::gather_candidates_in_dynamicalArray
+				(out_buf.d_device, rows, cols, *d_pTresh
+					, QUantPower2_Wnd, &d_arrCand_, &d_quantCand_);
+
+			}
+			end = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "  Time taken by function gather_candidates_for_dynamical.. : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+			
+
+			const int WndWidth = 1;
+			int* d_pbin_metrics = nullptr;
+			cudaMalloc((void**)&d_pbin_metrics, 3 * sizeof(int));
+			int h_pbin_metrics[3] = { 10, 10, 3 };
+			std::string filename111("ghgh.log");
+			cudaMemcpy(d_pbin_metrics, h_pbin_metrics, 3 * sizeof(int), cudaMemcpyHostToDevice);
+			start = std::chrono::high_resolution_clock::now();
+			for (int ic = 0; ic < num; ++ic)
+			{
+				
+
+				clusterization::complete_clusterization(d_arrCand_
+					, d_quantCand_
+					, d_pbin_metrics
+					, filename111
+					, 0.0f
+					, 0.0f
+					, false
+				);
+
+
+			}
+			end = std::chrono::high_resolution_clock::now();
+			duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+			std::cout << "  Time taken by function complete_clusterization : " << duration.count() / ((double)num) << " microseconds" << std::endl;
+			
+
+
+			delete[]arrFreddaCand;
+			delete[]arrMyCand;
+			cudaFree(d_arrCand);
+			cudaFree(d_arrCand_);
+			
+			/*----------------------------------------------------------------------------------------------*/
 		}
 
 		blocknum++;
